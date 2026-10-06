@@ -1,0 +1,74 @@
+diff --git a/manager/app/build.gradle.kts b/manager/app/build.gradle.kts
+index 8ab2d715de0ba24c2fc98c327097a8eb2ce75d56..23f63ed361a9a29f770f52356fea1841db794c70 100644
+--- a/manager/app/build.gradle.kts
++++ b/manager/app/build.gradle.kts
+@@ -26,6 +26,9 @@ android {
+     namespace = "com.rifsxd.ksunext"
+ 
+     buildTypes {
++        debug {
++            applicationIdSuffix = ".prctl"
++        }
+         release {
+             isMinifyEnabled = true
+             isShrinkResources = true
+@@ -59,9 +62,13 @@ android {
+         }
+     }
+ 
+-    externalNativeBuild {
+-        cmake {
+-            path = file("src/main/cpp/CMakeLists.txt")
++    // For the GrapheneOS seccomp compatibility test, reuse the unchanged JNI
++    // libraries from the official Manager APK and package the rebuilt ksud.
++    if (!project.hasProperty("ksuPrebuiltJniLibs")) {
++        externalNativeBuild {
++            cmake {
++                path = file("src/main/cpp/CMakeLists.txt")
++            }
+         }
+     }
+ 
+diff --git a/manager/build.gradle.kts b/manager/build.gradle.kts
+index 56f21ef7af397c1de7388c18030869e7d1064f31..6fb76412357f165eb2b1a568290d63a0c39f6243 100644
+--- a/manager/build.gradle.kts
++++ b/manager/build.gradle.kts
+@@ -61,6 +61,7 @@ subprojects {
+     plugins.withType(AndroidBasePlugin::class.java) {
+         extensions.configure(CommonExtension::class.java) {
+             compileSdk = androidCompileSdkVersion
++            buildToolsVersion = androidBuildToolsVersion
+             ndkVersion = androidCompileNdkVersion
+ 
+             defaultConfig {
+diff --git a/manager/gradle/libs.versions.toml b/manager/gradle/libs.versions.toml
+index 59735055370e3ef98b2ff6399aa06815e468b270..ceeac705269ca06fc9f29f31b35c81a1d5e68c3c 100644
+--- a/manager/gradle/libs.versions.toml
++++ b/manager/gradle/libs.versions.toml
+@@ -14,7 +14,7 @@ markdown = "4.6.2"
+ webkit = "1.14.0"
+ appiconloader-coil = "1.5.0"
+ parcelablelist = "2.0.1"
+-ndk = "29.0.14206865"
++ndk = "23.1.7779620"
+ libsu = "6.0.0"
+ apksign = "1.4"
+ cmaker = "1.2"
+diff --git a/manager/app/src/debug/res/values/strings.xml b/manager/app/src/debug/res/values/strings.xml
+new file mode 100644
+index 0000000000000000000000000000000000000000..291c1c199b9afb4c89fc478e2395fdeb97a6bb60
+--- /dev/null
++++ b/manager/app/src/debug/res/values/strings.xml
+@@ -0,0 +1,3 @@
++<resources>
++    <string name="app_name" translatable="false">KernelSU-Next (PRCTL test)</string>
++</resources>
+diff --git a/manager/app/src/debug/res/values-ru-rRU/strings.xml b/manager/app/src/debug/res/values-ru-rRU/strings.xml
+new file mode 100644
+index 0000000000000000000000000000000000000000..291c1c199b9afb4c89fc478e2395fdeb97a6bb60
+--- /dev/null
++++ b/manager/app/src/debug/res/values-ru-rRU/strings.xml
+@@ -0,0 +1,3 @@
++<resources>
++    <string name="app_name" translatable="false">KernelSU-Next (PRCTL test)</string>
++</resources>

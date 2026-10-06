@@ -1,0 +1,59 @@
+diff --git a/build/kernel/_setup_env.sh b/build/kernel/_setup_env.sh
+index 087040e54ca74cc3616f40f99a69844183ccaae8..368fdb79aa247bb9e90982797271860ba52b2cc7 100644
+--- a/build/kernel/_setup_env.sh
++++ b/build/kernel/_setup_env.sh
+@@ -264,6 +264,13 @@ if [ -n "${DTC}" ]; then
+   tool_args+=("DTC=${DTC}")
+ fi
+ 
++# Bazel sandboxes omit nested .git metadata. Pin the KSU release and the
++# locally rebuilt Manager signer/package used for the GrapheneOS seccomp test.
++tool_args+=("KSU_GIT_VERSION=3294" "KSU_GIT_TAG=v3.4.0" "KSU_GIT_VERSION_VALID=1")
++tool_args+=("KSU_NEXT_MANAGER_SIZE=0x2e8")
++tool_args+=("KSU_NEXT_MANAGER_HASH=729b3cc73dd52b1eb06e5f99ade350c097827e3976c2f8bf26ca68c354d69239")
++tool_args+=("KSU_MANAGER_PACKAGE=com.rifsxd.ksunext.prctl")
++
+ export TOOL_ARGS="${tool_args[@]}"
+ 
+ export DECOMPRESS_GZIP DECOMPRESS_LZ4 RAMDISK_COMPRESS RAMDISK_DECOMPRESS RAMDISK_EXT
+diff --git a/build/kernel/kleaf/impl/ddk/ddk_uapi_headers.bzl b/build/kernel/kleaf/impl/ddk/ddk_uapi_headers.bzl
+index d5e27d891be76e5824f6925dcc332293bc0d3cda..8e5af202607644258e86453c5d8d78aa1da3e159 100644
+--- a/build/kernel/kleaf/impl/ddk/ddk_uapi_headers.bzl
++++ b/build/kernel/kleaf/impl/ddk/ddk_uapi_headers.bzl
+@@ -36,7 +36,7 @@ def _ddk_uapi_headers_impl(ctx):
+          # Make the staging directory
+            mkdir -p {kernel_uapi_headers_dir}/usr
+          # Make unifdef, required by scripts/headers_install.sh
+-           make -C ${{KERNEL_DIR}} -f /dev/null scripts/unifdef
++           make -C ${{KERNEL_DIR}} -f /dev/null 'CC=/usr/bin/gcc -B/usr/lib64/gcc/x86_64-alt-linux/13/ -B/usr/bin/' scripts/unifdef
+          # Install each header individually
+            while read -r hdr; do
+              out_prefix=$(dirname $(echo ${{hdr}} | sed -e 's|.*include/uapi/||g'))
+diff --git a/build/kernel/kleaf/impl/stamp.bzl b/build/kernel/kleaf/impl/stamp.bzl
+index 509167cd64ac72cd9353d34021bbe3a2376940e6..82f18b825a9481d87210d47a6db0959d9e47f75f 100644
+--- a/build/kernel/kleaf/impl/stamp.bzl
++++ b/build/kernel/kleaf/impl/stamp.bzl
+@@ -56,7 +56,9 @@ def _write_localversion(ctx):
+     out_file = ctx.actions.declare_file(ctx.attr.name + "/localversion")
+     if ctx.attr._config_is_stamp[BuildSettingInfo].value:
+         inputs = [ctx.info_file]
+-        stable_scmversion_cmd = _get_status_at_path(ctx, "STABLE_SCMVERSIONS", '"${KERNEL_DIR}"')
++        # Keep the installed GrapheneOS 2026100201 module vermagic for this
++        # experimental KernelSU overlay; the source tree is intentionally modified.
++        stable_scmversion_cmd = "echo '-gf6f62ba75ac9'"
+     else:
+         inputs = []
+         stable_scmversion_cmd = "echo '-maybe-dirty'"
+diff --git a/private/devices/google/common/tools/build_dist.sh b/private/devices/google/common/tools/build_dist.sh
+index 2e77e7ca89a3d85733bea48f34cde282d6841787..341b2c05e3af27b28b8fb4747868f6d4b02c58cb 100755
+--- a/private/devices/google/common/tools/build_dist.sh
++++ b/private/devices/google/common/tools/build_dist.sh
+@@ -38,7 +38,7 @@ fi
+ 
+ sign_file=$(mktemp)
+ trap '{ rm -f -- "$sign_file"; }' EXIT
+-prebuilts/clang/host/linux-x86/clang-r487747c/bin/clang aosp/scripts/sign-file.c -lssl -lcrypto -o ${sign_file}
++/usr/bin/gcc aosp/scripts/sign-file.c -lssl -lcrypto -o ${sign_file}
+ find out/${DEVICE}/dist -type f -name "*.ko" \
+   -exec ${sign_file} sha256 \
+   $(find out/ -type f -name "signing_key.pem") \

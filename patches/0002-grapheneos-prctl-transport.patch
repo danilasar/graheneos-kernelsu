@@ -1,0 +1,303 @@
+diff --git a/kernel/include/arch.h b/kernel/include/arch.h
+index 7aba885eb03ce61180d8e37d02b88802ea694afa..6883df48732000b672687f1278b5726d6201487c 100644
+--- a/kernel/include/arch.h
++++ b/kernel/include/arch.h
+@@ -20,6 +20,7 @@
+ #define __PT_ORIG_SYSCALL_REG regs[8]
+ 
+ #define REBOOT_SYMBOL "__arm64_sys_reboot"
++#define PRCTL_SYMBOL "__arm64_sys_prctl"
+ #define SYS_READ_SYMBOL "__arm64_sys_read"
+ #define SYS_EXECVE_SYMBOL "__arm64_sys_execve"
+ // https://cs.android.com/android/kernel/superproject/+/common-android-mainline:common/scripts/syscalltbl.sh;l=57;drc=9142be9e6443fd641ca37f820efe00d9cd890eb1
+@@ -43,6 +44,7 @@
+ #define __PT_IP_REG ip
+ #define __PT_ORIG_SYSCALL_REG orig_ax
+ #define REBOOT_SYMBOL "__x64_sys_reboot"
++#define PRCTL_SYMBOL "__x64_sys_prctl"
+ #define SYS_READ_SYMBOL "__x64_sys_read"
+ #define SYS_EXECVE_SYMBOL "__x64_sys_execve"
+ #define SYS_FSTAT_SYMBOL "__x64_sys_newfstat"
+diff --git a/kernel/supercall/supercall.c b/kernel/supercall/supercall.c
+index 23bf12e1433e22c77791d1d53f70fbc8aa1d8cf4..24795b2344883a04fc15b54edbbb126d694734e8 100644
+--- a/kernel/supercall/supercall.c
++++ b/kernel/supercall/supercall.c
+@@ -119,7 +119,7 @@ static void ksu_install_fd_tw_func(struct callback_head *cb)
+     kfree(tw);
+ }
+ 
+-static int reboot_handler_pre(struct kprobe *p, struct pt_regs *regs)
++static int supercall_handler_pre(struct kprobe *p, struct pt_regs *regs)
+ {
+     struct pt_regs *real_regs = PT_REAL_REGS(regs);
+     int magic1 = (int)PT_REGS_PARM1(real_regs);
+@@ -150,12 +150,12 @@ static int reboot_handler_pre(struct kprobe *p, struct pt_regs *regs)
+         if (current_uid().val != 0)
+             return 0;
+ 
+-        pr_info("sys_reboot: ksu_set_manager_appid to: %d\n", cmd);
++        pr_info("ksu supercall: set manager appid to: %d\n", cmd);
+         ksu_set_manager_appid(cmd);
+ 
+         if (cmd == ksu_get_manager_appid()) {
+             if (copy_to_user((void __user *)arg4, &reply, sizeof(reply)))
+-                pr_info("sys_reboot: reply fail\n");
++                pr_info("ksu supercall: reply failed\n");
+         }
+ 
+         return 0;
+@@ -177,7 +177,7 @@ static int reboot_handler_pre(struct kprobe *p, struct pt_regs *regs)
+         if (current_uid().val != 0)
+             return 0;
+ 
+-        pr_info("sys_reboot: ksu_change_ksuver to: %d\n", cmd);
++        pr_info("ksu supercall: set version override to: %d\n", cmd);
+         ksuver_override = cmd;
+ 
+         if (copy_to_user((void __user *)arg4, &reply, sizeof(reply) ))
+@@ -204,13 +204,13 @@ static int reboot_handler_pre(struct kprobe *p, struct pt_regs *regs)
+         uint64_t u_pptr = 0;
+         uint64_t u_ptr = 0;
+ 
+-        pr_info("sys_reboot: ppptr: 0x%lx \n", (uintptr_t)ppptr);
++        pr_info("ksu supercall: ppptr: 0x%lx \n", (uintptr_t)ppptr);
+ 
+         // arg here is ***, pull out user-space ** via copy_from_user
+         if (copy_from_user(&u_pptr, ppptr, sizeof(u_pptr)))
+             return 0;
+ 
+-        pr_info("sys_reboot: u_pptr: 0x%lx \n", (uintptr_t)u_pptr);
++        pr_info("ksu supercall: u_pptr: 0x%lx \n", (uintptr_t)u_pptr);
+ 
+         // now we got the __user **
+         // we cannot dereference this as this is __user
+@@ -218,7 +218,7 @@ static int reboot_handler_pre(struct kprobe *p, struct pt_regs *regs)
+         if (copy_from_user(&u_ptr, (void __user *)u_pptr, sizeof(u_ptr)))
+             return 0;
+ 
+-        pr_info("sys_reboot: u_ptr: 0x%lx \n", (uintptr_t)u_ptr);
++        pr_info("ksu supercall: u_ptr: 0x%lx \n", (uintptr_t)u_ptr);
+ 
+         // for release
+         if (strncpy_from_user(release_buf, (char __user *)u_ptr, sizeof(release_buf)) < 0)
+@@ -235,7 +235,7 @@ static int reboot_handler_pre(struct kprobe *p, struct pt_regs *regs)
+             // we save current version as the original before modifying
+             strscpy(original_release_buf, u_curr->release, sizeof(original_release_buf));
+             strscpy(original_version_buf, u_curr->version, sizeof(original_version_buf));
+-            pr_info("sys_reboot: original uname saved: %s %s\n", original_release_buf, original_version_buf);
++            pr_info("ksu supercall: original uname saved: %s %s\n", original_release_buf, original_version_buf);
+         }
+ 
+         // so user can reset
+@@ -244,7 +244,7 @@ static int reboot_handler_pre(struct kprobe *p, struct pt_regs *regs)
+             memcpy(version_buf, original_version_buf, sizeof(version_buf));
+         }
+ 
+-        pr_info("sys_reboot: spoofing kernel to: %s - %s\n", release_buf, version_buf);
++        pr_info("ksu supercall: spoof uname to: %s - %s\n", release_buf, version_buf);
+ 
+         struct new_utsname *u = utsname();
+ 
+@@ -263,7 +263,13 @@ static int reboot_handler_pre(struct kprobe *p, struct pt_regs *regs)
+ 
+ static struct kprobe reboot_kp = {
+     .symbol_name = REBOOT_SYMBOL,
+-    .pre_handler = reboot_handler_pre,
++    .pre_handler = supercall_handler_pre,
++};
++
++/* GrapheneOS blocks reboot(2) for app processes; prctl(2) is allowed there. */
++static struct kprobe prctl_kp = {
++    .symbol_name = PRCTL_SYMBOL,
++    .pre_handler = supercall_handler_pre,
+ };
+ 
+ void __init ksu_supercalls_init(void)
+@@ -278,10 +284,18 @@ void __init ksu_supercalls_init(void)
+     } else {
+         pr_info("reboot kprobe registered successfully\n");
+     }
++
++    rc = register_kprobe(&prctl_kp);
++    if (rc) {
++        pr_err("prctl kprobe failed: %d\n", rc);
++    } else {
++        pr_info("prctl kprobe registered successfully\n");
++    }
+ }
+ 
+ void __exit ksu_supercalls_exit(void)
+ {
++    unregister_kprobe(&prctl_kp);
+     unregister_kprobe(&reboot_kp);
+     ksu_supercall_cleanup_state();
+ }
+diff --git a/manager/app/src/main/cpp/ksu.cc b/manager/app/src/main/cpp/ksu.cc
+index e2af9c7d0cdbf2207a3ac8096e2da45272b62448..f86c804267d30446ee5622c7fe31e607aa820205 100644
+--- a/manager/app/src/main/cpp/ksu.cc
++++ b/manager/app/src/main/cpp/ksu.cc
+@@ -20,11 +20,13 @@
+ 
+ static int fd = -1;
+ 
++static int request_driver_fd();
++
+ static inline int scan_driver_fd() {
+     const char *kName = "[ksu_driver]";
+     DIR *dir = opendir("/proc/self/fd");
+     if (!dir) {
+-        return -1;
++        return request_driver_fd();
+     }
+ 
+     int found = -1;
+@@ -60,7 +62,7 @@ static inline int scan_driver_fd() {
+     }
+ 
+     closedir(dir);
+-    return found;
++    return found >= 0 ? found : request_driver_fd();
+ }
+ 
+ template<typename... Args>
+@@ -75,6 +77,14 @@ static int ksuctl(unsigned long op, Args &&... args) {
+     return ioctl(fd, op, std::forward<Args>(args)...);
+ }
+ 
++static int request_driver_fd() {
++    int driver_fd = -1;
++    // GrapheneOS blocks reboot(2) for app processes but allows prctl(2).
++    // Match ksud's KSU_INSTALL_MAGIC supercall to receive this process's fd.
++    (void)syscall(SYS_prctl, 0xDEADBEEF, 0xCAFEBABE, 0, &driver_fd, 0);
++    return driver_fd;
++}
++
+ static struct ksu_get_info_cmd g_version {};
+ 
+ struct ksu_get_info_cmd get_info() {
+diff --git a/userspace/ksud/src/ksucalls.rs b/userspace/ksud/src/ksucalls.rs
+index ee7543993c20d78fcc14deb66e40fd7e4a4f0620..ecfdf013f10a24dc564749620c4932b0d4468e70 100644
+--- a/userspace/ksud/src/ksucalls.rs
++++ b/userspace/ksud/src/ksucalls.rs
+@@ -116,11 +116,12 @@ fn init_driver_fd() -> Option<RawFd> {
+         let mut fd = -1;
+         with_svc_call(|| unsafe {
+             libc::syscall(
+-                libc::SYS_reboot,
++                libc::SYS_prctl,
+                 ksu_uapi::KSU_INSTALL_MAGIC1,
+                 ksu_uapi::KSU_INSTALL_MAGIC2,
+                 0,
+                 &mut fd,
++                0,
+             )
+         });
+         if take_sigsys_occurred() {
+diff --git a/userspace/ksud/src/susfsd.rs b/userspace/ksud/src/susfsd.rs
+index 7fab108d51e9c74459077381a6fee99226bfc875..f7cd92ac9916e627e36b8042b0d22c06e602aadd 100644
+--- a/userspace/ksud/src/susfsd.rs
++++ b/userspace/ksud/src/susfsd.rs
+@@ -1,6 +1,6 @@
+-use std::ffi::CStr;
+ use anyhow::{Result, anyhow};
+-use libc::{syscall, SYS_reboot, c_char};
++use libc::{SYS_prctl, c_char, syscall};
++use std::ffi::CStr;
+ 
+ // Constants from susfsd.c
+ const KSU_INSTALL_MAGIC1: u64 = 0xDEADBEEF;
+@@ -41,13 +41,21 @@ pub fn show_version() -> Result<()> {
+     };
+ 
+     unsafe {
+-        syscall(SYS_reboot, KSU_INSTALL_MAGIC1, SUSFS_MAGIC, CMD_SUSFS_SHOW_VERSION, &mut cmd as *mut _);
++        syscall(
++            SYS_prctl,
++            KSU_INSTALL_MAGIC1,
++            SUSFS_MAGIC,
++            CMD_SUSFS_SHOW_VERSION,
++            &mut cmd as *mut _,
++            0,
++        );
+     }
+ 
+     check_unsupported(cmd.err, CMD_SUSFS_SHOW_VERSION)?;
+ 
+     if cmd.err == 0 {
+-        let version = unsafe { CStr::from_ptr(cmd.version.as_ptr() as *const c_char) }.to_string_lossy();
++        let version =
++            unsafe { CStr::from_ptr(cmd.version.as_ptr() as *const c_char) }.to_string_lossy();
+         println!("{}", version);
+         Ok(())
+     } else {
+@@ -62,13 +70,21 @@ pub fn show_variant() -> Result<()> {
+     };
+ 
+     unsafe {
+-        syscall(SYS_reboot, KSU_INSTALL_MAGIC1, SUSFS_MAGIC, CMD_SUSFS_SHOW_VARIANT, &mut cmd as *mut _);
++        syscall(
++            SYS_prctl,
++            KSU_INSTALL_MAGIC1,
++            SUSFS_MAGIC,
++            CMD_SUSFS_SHOW_VARIANT,
++            &mut cmd as *mut _,
++            0,
++        );
+     }
+ 
+     check_unsupported(cmd.err, CMD_SUSFS_SHOW_VARIANT)?;
+ 
+     if cmd.err == 0 {
+-        let variant = unsafe { CStr::from_ptr(cmd.variant.as_ptr() as *const c_char) }.to_string_lossy();
++        let variant =
++            unsafe { CStr::from_ptr(cmd.variant.as_ptr() as *const c_char) }.to_string_lossy();
+         println!("{}", variant);
+         Ok(())
+     } else {
+@@ -83,7 +99,14 @@ pub fn show_features(check_only: bool) -> Result<()> {
+     };
+ 
+     unsafe {
+-        syscall(SYS_reboot, KSU_INSTALL_MAGIC1, SUSFS_MAGIC, CMD_SUSFS_SHOW_ENABLED_FEATURES, &mut cmd as *mut _);
++        syscall(
++            SYS_prctl,
++            KSU_INSTALL_MAGIC1,
++            SUSFS_MAGIC,
++            CMD_SUSFS_SHOW_ENABLED_FEATURES,
++            &mut cmd as *mut _,
++            0,
++        );
+     }
+ 
+     check_unsupported(cmd.err, CMD_SUSFS_SHOW_ENABLED_FEATURES)?;
+@@ -108,7 +131,10 @@ pub fn show_features(check_only: bool) -> Result<()> {
+ 
+ fn check_unsupported(err: i32, cmd: u64) -> Result<()> {
+     if err == ERR_CMD_NOT_SUPPORTED {
+-        return Err(anyhow!("CMD: '0x{:x}', SUSFS operation not supported, please enable it in kernel", cmd));
++        return Err(anyhow!(
++            "CMD: '0x{:x}', SUSFS operation not supported, please enable it in kernel",
++            cmd
++        ));
+     }
+     Ok(())
+ }
+diff --git a/userspace/ksuinit/src/lib.rs b/userspace/ksuinit/src/lib.rs
+index 1a62d4c2b18197d338451a4c809edd1308acc481..3a84163596b602c5d5bdcea87c40a59594719ff6 100644
+--- a/userspace/ksuinit/src/lib.rs
++++ b/userspace/ksuinit/src/lib.rs
+@@ -435,11 +435,12 @@ fn has_kernelsu_v2() -> bool {
+     let mut fd: i32 = -1;
+     unsafe {
+         let _ = syscall!(
+-            Sysno::reboot,
++            Sysno::prctl,
+             KSU_INSTALL_MAGIC1,
+             KSU_INSTALL_MAGIC2,
+             0,
+-            std::ptr::addr_of_mut!(fd)
++            std::ptr::addr_of_mut!(fd),
++            0
+         );
+     }
+ 
