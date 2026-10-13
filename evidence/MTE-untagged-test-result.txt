@@ -1,9 +1,9 @@
-MTE/untagged-address temporary boot test — 2026-10-06
-Candidate SHA-256: ed42ca079105a68c3d15fcab6f3074635b762bd6865d48d5853ea3c458f804ec
-AVB security_patch property: 2026-09-05 (matches official boot; no higher patch level)
-Device: Pixel 8 shiba, GrapheneOS build 2026100201, slot _b; ro.sanitize.memtag_heap=true
+Проверка исправления MTE (снятие тегов с адресов) временной загрузкой — 2026-10-06
+SHA-256 кандидата: ed42ca079105a68c3d15fcab6f3074635b762bd6865d48d5853ea3c458f804ec
+Свойство AVB security_patch: 2026-09-05 (совпадает с официальным boot; уровень исправлений не завышен)
+Устройство: Pixel 8 shiba, сборка GrapheneOS 2026100201, слот _b; ro.sanitize.memtag_heap=true
 
-Kernel log:
+Журнал ядра:
 [9.599s] exec zygote, /data prepared, second_stage: 1
 [9.599s] on_post_fs_data!
 [19.575s] Searching manager...
@@ -12,6 +12,6 @@ Kernel log:
 [19.582s] Crowning manager: com.rifsxd.ksunext.prctl(uid=10265)
 [19.582s] Search manager finished
 
-The captured kernel log contained 0 occurrences of "Access filename failed for execve_handler_pre". KSU JNI probe returned version=33294 flags=0x2 manager_appid=10265. `ksud feature check su_compat` returned `supported` (previously EPERM).
+В снятом журнале ядра 0 сообщений "Access filename failed for execve_handler_pre". Проверка KSU через JNI вернула version=33294 flags=0x2 manager_appid=10265. `ksud feature check su_compat` вернул `supported` (раньше был EPERM).
 
-Conclusion: removing untagged_addr() from the user-pointer paths restored execve argument reads; the zygote hook, post-fs-data processing, manager scan and manager authorization all ran. ro.sanitize.memtag_heap=true is present, consistent with the proposed MTE explanation. No partition was written; test used fastboot boot only.
+Вывод: удаление untagged_addr() из путей чтения пользовательских указателей восстановило чтение аргументов execve; перехват запуска zygote, обработка post-fs-data, поиск менеджера и его авторизация отработали. ro.sanitize.memtag_heap=true присутствует, что согласуется с предложенным объяснением через MTE. Ни один раздел не записывался; для проверки использовался только fastboot boot.

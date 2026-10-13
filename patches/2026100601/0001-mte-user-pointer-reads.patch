@@ -1,0 +1,83 @@
+diff --git a/kernel/feature/adb_root.c b/kernel/feature/adb_root.c
+index 5945bd16..7340f704 100644
+--- a/kernel/feature/adb_root.c
++++ b/kernel/feature/adb_root.c
+@@ -27,7 +27,7 @@ static long is_exec_adbd(const char __user *filename_user)
+     char buf[40];
+     char __user *fn;
+     long ret;
+-    fn = (char __user *)untagged_addr((unsigned long)filename_user);
++    fn = (char __user *)(unsigned long)filename_user;
+     memset(buf, 0, sizeof(buf));
+ 
+     ret = strncpy_from_user(buf, fn, sizeof(buf));
+@@ -76,7 +76,7 @@ static long setup_ld_preload(struct pt_regs *regs, unsigned long *envp_p)
+     size_t env_count = 0, total_size;
+     long ret;
+ 
+-    envp = (char __user **)untagged_addr((unsigned long)*envp_p);
++    envp = (char __user **)(unsigned long)*envp_p;
+ 
+     ld_preload_p = stackp = ALIGN_DOWN(stackp - sizeof(kLdPreload), 8);
+     ret = copy_to_user(ld_preload_p, kLdPreload, sizeof(kLdPreload));
+diff --git a/kernel/feature/sucompat.c b/kernel/feature/sucompat.c
+index 6dae885c..229b1ab2 100644
+--- a/kernel/feature/sucompat.c
++++ b/kernel/feature/sucompat.c
+@@ -183,7 +183,7 @@ static long ksu_handle_execve_sucompat_common(const char __user **filename_user,
+ 	if (!ksu_is_allow_uid_for_current(current_uid().val))
+ 		goto do_orig_execve;
+ 
+-	addr = untagged_addr((unsigned long)*filename_user);
++	addr = (unsigned long)*filename_user;
+ 	fn = (const char __user *)addr;
+ 	memset(path, 0, sizeof(path));
+ 	ret = strncpy_from_user(path, fn, sizeof(path));
+diff --git a/kernel/hook/syscall_event_bridge.c b/kernel/hook/syscall_event_bridge.c
+index 9d2977f1..f6907dd1 100644
+--- a/kernel/hook/syscall_event_bridge.c
++++ b/kernel/hook/syscall_event_bridge.c
+@@ -29,7 +29,7 @@ static int ksu_handle_init_mark_tracker(const char __user **filename_user)
+     if (unlikely(!filename_user))
+         return 0;
+ 
+-    addr = untagged_addr((unsigned long)*filename_user);
++    addr = (unsigned long)*filename_user;
+     fn = (const char __user *)addr;
+     ret = strncpy_from_user(path, fn, sizeof(path));
+     if (ret < 0)
+diff --git a/kernel/runtime/ksud_integration.c b/kernel/runtime/ksud_integration.c
+index 6ee9b39d..6f8bbf3d 100644
+--- a/kernel/runtime/ksud_integration.c
++++ b/kernel/runtime/ksud_integration.c
+@@ -530,7 +530,7 @@ static void ksu_execve_hook_ksud_common(const char __user *filename_user, const
+     if (!filename_user)
+         return;
+ 
+-    addr = untagged_addr((unsigned long)filename_user);
++    addr = (unsigned long)filename_user;
+     fn = (const char __user *)addr;
+ 
+     memset(path, 0, sizeof(path));
+diff --git a/kernel/sulog/event.c b/kernel/sulog/event.c
+index 17375e1c..e97a65d7 100644
+--- a/kernel/sulog/event.c
++++ b/kernel/sulog/event.c
+@@ -202,7 +202,7 @@ static __u32 ksu_sulog_copy_filename(const char __user *filename_user, char *dst
+     if (!filename_user)
+         return ksu_sulog_copy_empty_string(dst);
+ 
+-    ret = strncpy_from_user_nofault(dst, (const void __user *)untagged_addr((unsigned long)filename_user), dst_len);
++    ret = strncpy_from_user_nofault(dst, (const void __user *)(unsigned long)filename_user, dst_len);
+     if (ret <= 0)
+         return ksu_sulog_copy_empty_string(dst);
+ 
+@@ -242,7 +242,7 @@ static __u32 ksu_sulog_flatten_argv(const char __user *const __user *argv_user,
+             return ksu_sulog_copy_empty_string(dst);
+ 
+         copied =
+-            strncpy_from_user_nofault(arg, (const void __user *)untagged_addr((unsigned long)arg_user), sizeof(arg));
++            strncpy_from_user_nofault(arg, (const void __user *)(unsigned long)arg_user, sizeof(arg));
+         if (copied <= 0)
+             return ksu_sulog_copy_empty_string(dst);
+ 

@@ -1,300 +1,142 @@
-# Установка KernelSU Next на Pixel 8 (`shiba`) с GrapheneOS
+# Установка KSU 3.4.1 на Pixel 8 / GrapheneOS 2026100601
 
-Инструкция охватывает два пути: установку готовых проверенных бинарных файлов и сборку ядра из исходников с патчами. Она относится только к проверенному сочетанию:
+Только `shiba`, fingerprint `google/shiba/shiba:17/CP3A.261005.005/2026100601:user/release-keys`, SPL `2026-10-05`, kernel `6.1.177-android14-11-g5969734141aa`. KSU встроен (`CONFIG_KSU=y`), не отдельный устанавливаемый `.ko`.
 
-```text
-Телефон:          Pixel 8, shiba
-GrapheneOS:       сборка 2026100201
-Отпечаток сборки: google/shiba/shiba:17/CP3A.260905.009/2026100201:user/release-keys
-Исходники ядра:   GrapheneOS kernel_pixel_6.1, коммит рабочего дерева 105c7cdc8e1139d83a1d8cc2dc56513e432db834
-Подмодуль ACK:    f6f62ba75ac9dbcf802b2ca2ebce2058362a04d6
-KSU Next:         тег v3.4.0, коммит 1a879d6a866f80b1fa1c1009a2ffa747873cbb5e
-```
+## 1. Готовый комплект: подготовка
 
-### Теги и точность воспроизведения
-
-- GrapheneOS на устройстве: выпуск (сборка) `2026100201`, уровень исправлений безопасности `2026-09-05`.
-- Рабочее дерево ядра GrapheneOS: тег Git `2026100200`, коммит `105c7cdc8e1139d83a1d8cc2dc56513e432db834` (ветка `17`).
-- ACK `common/ack`: тег Git `2026100200`, коммит `f6f62ba75ac9dbcf802b2ca2ebce2058362a04d6`.
-- KernelSU Next: тег Git `v3.4.0`, коммит `1a879d6a866f80b1fa1c1009a2ffa747873cbb5e`.
-
-Значит, бинарный файл проверен на GrapheneOS `2026100201`, но исходные деревья ядра и ACK были на тегах `2026100200`; отдельного тега исходников `2026100201` в использованном дереве не было. Точная воспроизводимость гарантируется только при тех же ревизиях исходников и тех же переопределениях сборки, а не просто при выборе похожего тега.
-
-Задай путь к каталогу выпуска и выполняй команды с относительным `artifacts/` из него:
+Выполняй команды из корня этого репозитория. Укажи USB serial, а не выбирай первое устройство: могут одновременно отображаться USB и беспроводной ADB.
 
 ```sh
-export RELEASE_DIR=/path/to/ksu-next-shiba-2026100201-release
+export SERIAL=YOUR_PIXEL_SERIAL
+export RELEASE_DIR="$PWD"
+(cd artifacts/2026100601 && sha256sum -c SHA256SUMS)
+adb -s "$SERIAL" shell 'getprop ro.product.device; getprop ro.build.fingerprint; getprop ro.build.version.security_patch; getprop ro.boot.slot_suffix; getprop ro.boot.vbmeta.device_state'
 ```
 
-**Не прошивай приложенный загрузочный образ на другую сборку GrapheneOS, на другой Pixel или после OTA-обновления.** Для новой сборки сначала нужно пересобрать ядро из подходящих исходников и перепаковать образ с актуальным уровнем исправлений безопасности.
+При несовпадении ОС/модели остановись. Загрузчик должен уже быть разблокирован; повторный unlock не нужен. Unlock стирает данные и не входит в эту процедуру.
 
-## 0. Что именно установлено и важные ограничения
-
-- KernelSU Next встроен в образ ядра (`CONFIG_KSU=y`), это не устанавливаемый `.ko`-модуль.
-- Основной исправленный образ — `artifacts/boot-shiba-grapheneos-2026100201-ksunext-mte-prctl.img`. Он проверен и записан только в загрузочный раздел активного слота. На тестовом телефоне это был `boot_b`.
-- Для управления нужен именно **тестовый менеджер** `com.rifsxd.ksunext.prctl` из `artifacts/KernelSU-Next-v3.4.0-33294-prctl-test-manager.apk`; он устанавливается параллельно с обычным. Обычный `com.rifsxd.ksunext` не подойдёт: в это тестовое ядро зашиты имя пакета и подпись именно тестового менеджера.
-- В образе `security_patch=2026-09-05`; размер ровно 64 МиБ. Не прошивай напрямую файл `out/shusky/dist/boot.img` размером 51 МиБ — его сначала нужно упаковать с хвостовым блоком AVB под раздел 64 МиБ.
-- Эта процедура меняет только `boot_<активный слот>`. На тестовом телефоне `init_boot_b` был изменён в более раннем отдельном эксперименте; перед OTA-обновлением на этом телефоне восстанови и `init_boot_b` из штатного образа той же сборки. На новом устройстве, где `init_boot` не трогали, не прошивай его.
-- Загрузчик должен оставаться **разблокированным**. Не выполняй `fastboot flashing lock` с этим образом.
-- Разблокировка загрузчика стирает данные. Если на телефоне есть данные, сначала сделай проверенную резервную копию. Сама запись `boot_<слот>` данные не стирает; `fastboot -w` здесь не нужен и запрещён этой процедурой.
-
-## 1. Требования
-
-- Linux x86_64 для сборки (если пересобираешь); свободное место для исходников, кеша Bazel и результатов сборки.
-- `git`, Python 3, `adb`, `fastboot`, `unzip`, Android platform-tools; для сборки — системный GCC и заголовочные файлы OpenSSL. Bazel, Clang и остальные инструменты сборки ядра входят в репозиторий ядра.
-- Pixel 8 с установленной и загруженной GrapheneOS сборки `2026100201`.
-- USB-кабель и возможность подтверждать действия на экране загрузчика.
-- Патчи и бинарные файлы из соседних каталогов `patches/` и `artifacts/`.
-
-Если GrapheneOS ещё не установлена, установи её по официальной инструкции <https://grapheneos.org/install/>. Этот документ начинается после первой загрузки GrapheneOS. Для использования пользовательского ядра загрузчик после установки должен быть разблокирован. Не блокируй его после установки нашего образа.
-
-## 2. Подготовка исходников и применение патчей
-
-Этот раздел нужен только для самостоятельной сборки. Для установки уже собранного образа переходи к разделу 4.
-
-### 2.1. Клонировать точное рабочее дерево ядра GrapheneOS
+Установи исправленный менеджер **до загрузки нового ядра**:
 
 ```sh
-git clone https://gitlab.com/GrapheneOS/kernel_pixel_6.1.git
+adb -s "$SERIAL" install -r artifacts/2026100601/Manager-prctl341-with-ksud.apk
+```
+
+Пакет — `com.rifsxd.ksunext.prctl341`, сертификат SHA256 `b4eb1c14210fff0e1d8102e0f54a9cd1dfd674050dc3a520ff88dc8c048b0da3`. Не заменять обычным Manager. APK должен содержать `lib/arm64-v8a/libksud.so`: одного JNI драйвера недостаточно.
+
+## 2. Временная загрузка и проверка
+
+```sh
+adb -s "$SERIAL" reboot bootloader
+fastboot -s "$SERIAL" getvar unlocked
+fastboot -s "$SERIAL" getvar current-slot
+fastboot -s "$SERIAL" boot artifacts/2026100601/boot-ksu341.img
+```
+
+После возвращения ADB проверь:
+
+```sh
+adb -s "$SERIAL" shell 'getprop sys.boot_completed; getprop ro.boot.bootreason; getprop sys.boot.reason; cat /proc/uptime; getprop ro.build.version.incremental; getprop ro.boot.slot_suffix; uname -r; getenforce; wc -l /proc/modules'
+adb -s "$SERIAL" shell monkey -p com.rifsxd.ksunext.prctl341 -c android.intent.category.LAUNCHER 1
+```
+
+Ожидаются build `2026100601`, завершённая загрузка, Enforcing, работающий Manager v3.4.1/33333/UAPI5 и root. На двух тестовых телефонах загрузились 316 модулей, включая Wi-Fi/GPU/GXP/thermal. Количество само по себе не заменяет проверку нужных модулей и функций.
+
+**Не считать boot_completed и uname доказательством:** после неудачного временного boot телефон может перезагрузиться на штатное ядро. Watchdog boot reason, сброс uptime, недоступный драйвер — повод остановиться. В bugreport различай `KERNEL LOG (dmesg)` текущей загрузки и `LAST KMSG` предыдущей. Обычная перезагрузка после `fastboot boot` возвращает образ из раздела, а не кандидат.
+
+Независимая проверка root через отладочный Manager (не выдаёт разрешение UID2000):
+
+```sh
+BASE=$(adb -s "$SERIAL" shell pm path com.rifsxd.ksunext.prctl341 | head -1 | tr -d '\r' | cut -d: -f2)
+LIB="${BASE%/base.apk}/lib/arm64/libksud.so"
+adb -s "$SERIAL" shell run-as com.rifsxd.ksunext.prctl341 "$LIB" debug version
+printf 'id\ngetenforce\nexit\n' | adb -s "$SERIAL" shell "run-as com.rifsxd.ksunext.prctl341 '$LIB' debug su"
+```
+
+Ожидаются `Kernel Version: 33333`, `uid=0`, `u:r:ksu:s0`, Enforcing. `adb shell su -c id` может не работать на чистом телефоне до отдельного разрешения shell UID2000. `adb root` — другая функция production adbd.
+
+Проверь нужные приложения. Neo Backup требует отдельного root-профиля; прежний рабочий профиль использовал все capabilities, но минимальный набор не установлен. Не расширять права автоматически и не переводить SELinux в permissive.
+
+## 3. Запись после успешного теста
+
+Только после проверки и явного разрешения владельца снова войди в bootloader. Ещё раз проверь слот, unlocked и размер **конкретного** раздела.
+
+```sh
+adb -s "$SERIAL" reboot bootloader
+fastboot -s "$SERIAL" getvar current-slot
+fastboot -s "$SERIAL" getvar unlocked
+# Только если current-slot: a:
+fastboot -s "$SERIAL" getvar partition-size:boot_a
+fastboot -s "$SERIAL" flash boot_a artifacts/2026100601/boot-ksu341.img
+fastboot -s "$SERIAL" reboot
+```
+
+Для текущего B используй только `boot_b`, не обе команды. Размер раздела `0x4000000`. После постоянной загрузки повтори проверки версии, root, boot reason и модулей. Не трогать `init_boot`, `vendor_boot`, `vendor_kernel_boot`, `dtbo`, `vbmeta` или dlkm-разделы. Не менять слот.
+
+## 4. Сборка из исходников
+
+Нужны Linux x86_64, Git, Python3, GCC/OpenSSL headers, LZ4, Rust с Android target, Android SDK/NDK29, Java21. Свободное место контролируй; полные build caches занимают гигабайты.
+
+```sh
+git clone --branch 2026100600 https://gitlab.com/GrapheneOS/kernel_pixel_6.1.git kernel_pixel_6.1
 cd kernel_pixel_6.1
-git checkout 105c7cdc8e1139d83a1d8cc2dc56513e432db834
+git checkout 6e6affd1156ffe7f564f8f65f6d923be8924a7b9
 git submodule update --init common/ack
-```
-
-Проверь, что подмодуль ACK находится на ожидаемой ревизии:
-
-```sh
-git -C common/ack rev-parse HEAD
-# ожидается f6f62ba75ac9dbcf802b2ca2ebce2058362a04d6
-```
-
-### 2.2. Получить и подготовить KernelSU Next
-
-```sh
+# common/ack HEAD обязан быть 5969734141aa492032b4bcab559c704e064fe7cf
 git clone https://github.com/KernelSU-Next/KernelSU-Next.git common/ack/KernelSU-Next
-cd common/ack/KernelSU-Next
-git checkout 1a879d6a866f80b1fa1c1009a2ffa747873cbb5e
+git -C common/ack/KernelSU-Next checkout 8f902aeb16033024143ae36cf711df902cf02fae
 ```
 
-Из корня этого репозитория примени изменения исходников:
+Не использовать shallow KSU без точной настройки версии; sandbox не содержит вложенные Git metadata. Применение пяти патчей и копирование исходников описаны в [patches/2026100601/README.md](patches/2026100601/README.md). Настройки GCC host-specific, их нужно проверить.
+
+### 4.1. Полноценный APK
+
+Выполняй из `common/ack/KernelSU-Next`; укажи свой SDK/NDK и путь к host libclang. Сборка ARM64 без необязательных LKM образов предназначена для нашего встроенного KSU, не для patch/install LKM экранов.
 
 ```sh
-git apply "$RELEASE_DIR/patches/0001-mte-user-pointer-reads.patch"
-git apply "$RELEASE_DIR/patches/0002-grapheneos-prctl-transport.patch"
+export ANDROID_HOME="$HOME/Android/Sdk"
+export ANDROID_NDK_HOME="$ANDROID_HOME/ndk/29.0.14206865"
+export PATH="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin:$PATH"
+export CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER=aarch64-linux-android35-clang
+export CC_aarch64_linux_android=aarch64-linux-android35-clang
+export AR_aarch64_linux_android=llvm-ar
+export LIBCLANG_PATH=/path/to/host/libclang/directory
+export BINDGEN_EXTRA_CLANG_ARGS_aarch64_linux_android="--sysroot=$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/sysroot --target=aarch64-linux-android35"
+rustup target add aarch64-linux-android
+(cd userspace/ksud && cargo build --locked --release --target aarch64-linux-android)
+mkdir -p manager/app/src/main/jniLibs/arm64-v8a
+cp userspace/ksud/target/aarch64-linux-android/release/ksud manager/app/src/main/jniLibs/arm64-v8a/libksud.so
+(cd manager && JAVA_HOME=/path/to/java-21 ./gradlew :app:assembleDebug)
 ```
 
-`0003-prctl-test-manager-build.patch` меняет настройки Gradle и отладочной сборки менеджера; для сборки ядра он не нужен. Для установки используй готовый тестовый APK. Пересборка APK требует JNI-библиотек и ключа подписи, которые не входят в набор патчей; без того же сертификата ядро не распознает менеджер с другой подписью.
+Проверь ZIP содержимое и `apksigner verify --print-certs`. Включена preBuild-проверка наличия arm64 ksud. Но она проверяет наличие, не происхождение: используй именно только что собранный PRCTL бинарник.
 
-### 2.3. Включить KernelSU в ACK
+**Подпись:** локальный новый debug key не совпадёт с опубликованным APK. Для воспроизведения с новым ключом сначала собери APK, извлеки DER сертификат, вычисли его размер и SHA256, затем замени ожидаемые package/hash/size в `build/kernel/_setup_env.sh` (патч 0005) и пересобери ядро. Закрытый ключ опубликованного Manager не включён. Старый опубликованный boot работает только с опубликованным совместимым APK.
 
-Из каталога `common/ack`:
+### 4.2. Сертификат и сборка ядра
+
+Публичный `artifacts/2026100601/module-signing-cert.pem` извлечён из официального boot этой ОС. DER SHA256 `9ca70bf606dcf3c61b91340d63cdfdb709168a0ad9a6f6ee723181bdef4af9cd`. Не использовать старый сертификат от `2026100201`; несовпадение приводит к отказу модулей и раннему watchdog.
+
+Из корня kernel workspace:
 
 ```sh
-git apply "$RELEASE_DIR/patches/0004-ack-kernelsu-integration.patch"
-ln -s ../KernelSU-Next/kernel drivers/kernelsu
-cp "$RELEASE_DIR/artifacts/grapheneos-2026100201-module-signing-cert.pem" \
-   certs/grapheneos-2026100201-module-signing-cert.pem
+KLEAF_REPO_MANIFEST=aosp_manifest.xml tools/bazel run --config=stamp --config=shusky //private/devices/google/shusky:shusky/dist --disable_slab_canary --lto=full
 ```
 
-Запись KSU в Kconfig по умолчанию включает `KSU`, если выполнены зависимости (`KPROBES`, `EXT4_FS`); в журнале сборки должна появиться версия KernelSU Next `33294`.
+Эта команда создаёт dist; отдельный postprocessing wrapper для подписи локальных `.ko` не запускался при финальной сборке. Локальные `.ko` не устанавливаются на телефон: используем штатные подписанные модули. Проверь итоговый `.config`: KSU=y, MODULE_SIG_FORCE=y, правильный SYSTEM_TRUSTED_KEYS; DER сертификат должен фактически присутствовать в `out/shusky/dist/Image`. Проверяй полный vermagic, включая RANDSTRUCT, и ABI; подмена suffix не обеспечивает совместимость.
 
-### 2.4. Применить локальные переопределения сборки и собрать
+### 4.3. Упаковка
 
-Вернись в корень `kernel_pixel_6.1` и примени переопределения, зависящие от сборочной машины:
+Не прошивай промежуточный dist/boot.img напрямую:
 
 ```sh
-cd /path/to/kernel_pixel_6.1
-git apply "$RELEASE_DIR/patches/0005-local-build-overrides.patch"
+mkdir -p out/ksu-final/unpacked
+python3 tools/mkbootimg/unpack_bootimg.py --boot_img out/shusky/dist/boot.img --out out/ksu-final/unpacked
+python3 tools/mkbootimg/mkbootimg.py --header_version 4 --os_version 17.0.0 --os_patch_level 2026-10 --kernel out/ksu-final/unpacked/kernel --ramdisk out/ksu-final/unpacked/ramdisk --cmdline '' --output out/ksu-final/boot.img
+prebuilts/kernel-build-tools/linux-x86/bin/avbtool add_hash_footer --image out/ksu-final/boot.img --partition_name boot --partition_size 0x4000000 --prop com.android.build.boot.security_patch:2026-10-05
+prebuilts/kernel-build-tools/linux-x86/bin/avbtool verify_image --image out/ksu-final/boot.img
+prebuilts/kernel-build-tools/linux-x86/bin/avbtool info_image --image out/ksu-final/boot.img
+stat -c %s out/ksu-final/boot.img
+sha256sum out/ksu-final/boot.img
 ```
 
-В `0005` прописан путь к заголовкам GCC для использованного ALT Linux. На другой Linux-системе проверь и при необходимости исправь этот путь, а также `/usr/bin/gcc` в переопределениях Kleaf; патч не универсален и подходит не для всякой сборочной машины.
-
-Сборка для Pixel 8 (shusky):
-
-```sh
-KLEAF_REPO_MANIFEST=aosp_manifest.xml ./build_shusky.sh --lto=full
-```
-
-Ожидаемый промежуточный результат: `out/shusky/dist/boot.img`. У этого промежуточного файла другой размер и другой хвостовой блок; не прошивай его напрямую.
-
-### 2.5. Упаковать собранное ядро в проверяемый загрузочный образ размером 64 МиБ
-
-Выполняй из корня `kernel_pixel_6.1`. Здесь повторяется структура проверенного образа: загрузочный заголовок версии 4, ядро из сборки, пустой RAM-диск и пустая командная строка ядра; затем добавляется хвостовой блок AVB с хешем под размер загрузочного раздела Pixel 8 и уровень исправлений безопасности, соответствующий GrapheneOS `2026100201`.
-
-```sh
-set -euo pipefail
-KERNEL_TREE="$PWD"
-OUT="$KERNEL_TREE/out/ksu-shiba-final"
-mkdir -p "$OUT/unpacked"
-
-python3 tools/mkbootimg/unpack_bootimg.py \
-  --boot_img "$KERNEL_TREE/out/shusky/dist/boot.img" \
-  --out "$OUT/unpacked"
-
-python3 tools/mkbootimg/mkbootimg.py \
-  --header_version 4 \
-  --kernel "$OUT/unpacked/kernel" \
-  --ramdisk "$OUT/unpacked/ramdisk" \
-  --cmdline '' \
-  --output "$OUT/boot.img"
-
-prebuilts/kernel-build-tools/linux-x86/bin/avbtool add_hash_footer \
-  --image "$OUT/boot.img" \
-  --partition_name boot \
-  --partition_size 0x4000000 \
-  --prop com.android.build.boot.security_patch:2026-09-05
-
-stat -c 'image size=%s bytes' "$OUT/boot.img"
-prebuilts/kernel-build-tools/linux-x86/bin/avbtool verify_image --image "$OUT/boot.img"
-prebuilts/kernel-build-tools/linux-x86/bin/avbtool info_image --image "$OUT/boot.img"
-sha256sum "$OUT/boot.img"
-```
-
-Проверь размер `67108864` байт и `security_patch=2026-09-05`. Для исходного готового файла ожидаемый SHA-256 приведён в `artifacts/README.md`; у пересобранного файла хеш может быть другим, поэтому не подменяй проверку AVB простым сравнением SHA с готовым образом.
-
-## 3. Подготовить загрузчик
-
-Проверь устройство и систему до изменений:
-
-```sh
-adb devices -l
-adb -s SERIAL shell 'getprop ro.build.version.incremental; getprop ro.build.fingerprint; getprop ro.boot.slot_suffix; getprop ro.boot.vbmeta.device_state'
-```
-
-Для готового образа обязательны сборка `2026100201` и отпечаток с `CP3A.260905.009/2026100201`. Если у тебя другое значение — остановись и не прошивай этот образ.
-
-Если загрузчик уже разблокирован, **не запускай** команду разблокировки повторно. Если он заблокирован:
-
-1. Включи в GrapheneOS раздел «Для разработчиков» и в нём «Заводскую разблокировку» (OEM unlocking).
-2. Перезагрузи телефон в загрузчик: `adb -s SERIAL reboot bootloader`.
-3. Проверь, что `fastboot devices -l` показывает именно твой Pixel.
-4. Выполни `fastboot -s SERIAL flashing unlock` и подтверди разблокировку на телефоне. Это стирает пользовательские данные.
-5. Загрузи GrapheneOS, заверши первоначальную настройку, включи отладку по USB и снова проверь сборку. Не блокируй загрузчик.
-
-## 4. Установить готовый KernelSU Next
-
-Из каталога с `artifacts/` проверь файлы:
-
-```sh
-cd "$RELEASE_DIR"
-sha256sum -c <<'EOF'
-ed42ca079105a68c3d15fcab6f3074635b762bd6865d48d5853ea3c458f804ec  artifacts/boot-shiba-grapheneos-2026100201-ksunext-mte-prctl.img
-a6de2abbf084e339cd9c003750f099e67902eccaf3fefb67d14b72d0a1eee067  artifacts/KernelSU-Next-v3.4.0-33294-prctl-test-manager.apk
-EOF
-```
-
-Установи **именно этот** тестовый менеджер до первой загрузки с KernelSU:
-
-```sh
-adb -s SERIAL install -r artifacts/KernelSU-Next-v3.4.0-33294-prctl-test-manager.apk
-```
-
-Затем перейди в загрузчик и проверь текущий слот и состояние разблокировки:
-
-```sh
-adb -s SERIAL reboot bootloader
-fastboot devices -l
-fastboot -s SERIAL getvar unlocked
-fastboot -s SERIAL getvar current-slot
-```
-
-Прошей только `boot` активного слота. Подставь `a` или `b` — то, что вернул `current-slot`:
-
-```sh
-# если current-slot: a
-fastboot -s SERIAL flash boot_a artifacts/boot-shiba-grapheneos-2026100201-ksunext-mte-prctl.img
-
-# если current-slot: b
-fastboot -s SERIAL flash boot_b artifacts/boot-shiba-grapheneos-2026100201-ksunext-mte-prctl.img
-
-fastboot -s SERIAL reboot
-```
-
-Не прошивай на этом шаге `init_boot`, `vendor_boot`, `vendor_kernel_boot`, `dtbo`, `vbmeta` или загрузочные разделы обоих слотов сразу. Это не команда полной установки GrapheneOS. На проверенном телефоне активным был слот `_b`, и записан был только `boot_b`.
-
-## 5. Проверить загрузку и root
-
-После запуска GrapheneOS:
-
-```sh
-adb -s SERIAL wait-for-device
-adb -s SERIAL shell 'getprop sys.boot_completed; getprop ro.boot.slot_suffix; getprop ro.build.version.incremental; uname -r'
-adb -s SERIAL shell su -c id
-```
-
-Ожидается `sys.boot_completed=1`, та же сборка GrapheneOS, а `su -c id` должен показать `uid=0` и контекст KernelSU. Обычный `adb shell id` остаётся с UID 2000; `adb root` на выпускной сборке GrapheneOS не является проверкой KernelSU и обычно не включает root для `adbd`.
-
-Открой `KernelSU-Next (PRCTL test)`. Ожидаются драйвер v3.4.0, версия `33294` и зарегистрированный менеджер. Приложениям, которым нужен root, разрешение выдаётся в менеджере отдельно. Не устанавливай вместо тестового APK обычный менеджер, если рассчитываешь управлять этим конкретным образом: ядро привязано к `com.rifsxd.ksunext.prctl` и его подписи.
-
-## 6. Neo Backup и профиль root
-
-После переустановки Android профиль приложения нужно настроить заново. На проверенном устройстве Neo Backup (`com.machiav3lli.backup`) заработал после выдачи root и настройки отдельного профиля root в менеджере KernelSU. Команда для проверки текущей настройки (ничего не меняет):
-
-```sh
-adb -s SERIAL shell su -c '/data/adb/ksu/bin/ksud profile get com.machiav3lli.backup'
-```
-
-Известный рабочий профиль на тестовом телефоне: `allow_su=true`, отдельный профиль root (`use_default=false`), домен SELinux `u:r:ksu:s0`, пространство имён `global`, флаг `NO_NEW_PRIVS`; в нём выбраны **все привилегии (capabilities), доступные этой сборке KernelSU**. Это широкие полномочия, применяй их только к доверенному Neo Backup; минимальный набор привилегий не выяснялся. Не включай разрешающий режим SELinux (permissive) постоянно.
-
-## 7. Обновления и восстановление
-
-- OTA-обновление GrapheneOS может заменить ядро в обновлённом слоте. После обновления проверяй идентификатор сборки и ядро. Не прошивай старый `boot` на новую сборку.
-- При циклической перезагрузке восстанавливай штатные образы той же сборки, только если ОС по-прежнему `2026100201`: войди в загрузчик кнопками, проверь `current-slot` и восстанови изменённые разделы в соответствующем слоте. Для тестового телефона, где ранее менялся `init_boot_b`:
-
-```sh
-fastboot -s SERIAL flash boot_b artifacts/stock-boot-shiba-2026100201-rollback.img
-fastboot -s SERIAL flash init_boot_b artifacts/stock-init_boot-shiba-2026100201-rollback.img
-# для слота A используй boot_a/init_boot_a
-fastboot -s SERIAL reboot
-```
-
-На новом устройстве, где по инструкции менялся только `boot`, достаточно восстановить `boot_<слот>`; нетронутый `init_boot` прошивать не нужно.
-
-- Образы для отката в `artifacts/` относятся только к GrapheneOS `2026100201`. Для другой версии используй официальный `boot.img` именно этой версии.
-- Не блокируй загрузчик с KSU-образом и не запускай `fastboot -w`.
-
-## 8. Как обновлять GrapheneOS и KernelSU вместе
-
-Образ KernelSU привязан к конкретной версии ядра и GrapheneOS. Текущий готовый образ относится только к `2026100201`; после любого OTA-обновления GrapheneOS повторно его не прошивай.
-
-### Рекомендуемый порядок OTA-обновления GrapheneOS
-
-1. Сделай резервную копию важных данных. Убедись, что под рукой есть штатные загрузочные образы, соответствующие **текущей** сборке. Для `2026100201` они сохранены как `artifacts/stock-boot-shiba-2026100201-rollback.img` и `artifacts/stock-init_boot-shiba-2026100201-rollback.img`.
-2. Чтобы программа обновления при проверке OTA не столкнулась с несовпадением хешей исходных разделов, восстанови штатные образы всех изменённых загрузочных разделов текущего активного слота. На тестовом телефоне ранее менялся `init_boot_b`, поэтому для текущего `_b` восстанови оба раздела:
-
-   ```sh
-   adb -s SERIAL reboot bootloader
-   fastboot -s SERIAL getvar current-slot
-   fastboot -s SERIAL flash boot_b artifacts/stock-boot-shiba-2026100201-rollback.img
-   fastboot -s SERIAL flash init_boot_b artifacts/stock-init_boot-shiba-2026100201-rollback.img
-   fastboot -s SERIAL reboot
-   ```
-
-   На новом устройстве, где по этой инструкции менялся только `boot`, восстанавливай только `boot_<слот>`; нетронутый `init_boot` не перепрошивай. Это временно убирает KernelSU из загружаемой системы, но не стирает `/data`; установленный менеджер и профиль обычно остаются в пользовательских данных. Используй только штатные образы от текущей версии.
-3. После загрузки запусти штатное приложение обновления системы GrapheneOS (System Updater) и установи OTA-обновление обычным способом. Загрузчик оставь разблокированным. Не запускай `fastboot -w`, полный `flash-all.sh` или `fastboot flashing lock`. Если обновление сообщает об ошибке, остановись и сохрани журнал; не пытайся принудительно прошивать случайные образы.
-4. После обновления дай телефону полностью загрузиться. Проверь новый `ro.build.version.incremental`, отпечаток сборки, активный слот и ядро. Ожидаемо в новом слоте будет штатное ядро, а KernelSU временно пропадёт.
-5. Чтобы вернуть KSU, собери новый образ **именно под эту** сборку GrapheneOS и её ядро и проверь его временной загрузкой через `fastboot boot`. После успешной проверки прошей этим образом только `boot_<текущий активный слот>` и перезагрузи телефон.
-
-OTA-обновление по схеме A/B обычно записывается в неактивный слот, после чего активный слот переключается. Поэтому не рассчитывай, что KSU останется в новом активном слоте: после обновления всегда проверяй `current-slot` и идентификатор сборки. В предыдущем слоте может остаться старое ядро; не загружай его как способ обычного отката, если не проверил совместимость его системных разделов и защиту от отката.
-
-### Обновление KernelSU Next
-
-KernelSU здесь встроен в образ ядра, а не установлен отдельным обновляемым `.ko`. Поэтому обновление версии KSU — это новая сборка образа ядра:
-
-1. Получи исходники ядра GrapheneOS и KernelSU Next, соответствующие целевой сборке GrapheneOS.
-2. Перенеси патчи из `patches/` на новые исходники и пересмотри их. Старые патчи привязаны к указанным в них коммитам; при конфликтах нельзя применять их вслепую. Проверь, что новым версиям всё ещё нужны транспорт через `prctl` и исправление чтения пользовательских указателей при включённом MTE.
-3. Собери ядро и загрузочный образ, сохраняя совместимость с модулями конкретной сборки GrapheneOS, сертификатом модулей, ABI и `vermagic`, а также с установленным тестовым менеджером. Сначала только `fastboot boot`; затем проверь загрузку, менеджер, root, модули и нужные приложения.
-4. Лишь после проверки прошей новый образ в активный `boot_<слот>`. Сохраняй для отката предыдущий образ и штатный `boot.img` той же сборки.
-
-### Обновление менеджера и профилей приложений
-
-APK менеджера можно обновлять отдельно от ядра, но его идентификатор пакета и сертификат подписи должны совпадать с теми, что зашиты в ядро. Для текущего образа это `com.rifsxd.ksunext.prctl` и конкретная подпись приложенного тестового APK. Ключ подписи для пересборки такого APK не распространяется, поэтому безопаснее всего сохранить этот APK. При смене пакета или подписи менеджера нужно обновить ожидаемые имя пакета, хеш и размер в настройках сборки и пересобрать ядро вместе с совместимым APK.
-
-После OTA-обновления GrapheneOS пользовательские данные обычно сохраняются, поэтому разрешения и профили root должны остаться, но после возвращения KSU их нужно проверить. После обновления ядра проверь профиль Neo Backup командой из раздела 6. В известной рабочей настройке там включены все привилегии данной сборки; минимальный набор не выяснен, поэтому не сужай и не расширяй профиль без проверки.
-
-## 9. Связанные файлы
-
-- Отдельная процедура OTA-обновления GrapheneOS и обновления KernelSU: `UPDATE.md`.
-- Патчи и порядок их применения: `patches/README.md`.
-- Бинарные файлы и SHA-256: `artifacts/README.md`.
-- История диагностики и технические подробности: `REPORT.md`.
+Размер 67108864. AVB Algorithm NONE: проверка подтверждает целостность hash/footer, **не официальную подпись или право блокировать загрузчик**. SHA пересборки может отличаться (в том числе из-за соли AVB). Заголовок и SPL всегда сверяй со штатным образом целевой ОС.

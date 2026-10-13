@@ -1,0 +1,46 @@
+diff --git a/arch/arm64/configs/gki_defconfig b/arch/arm64/configs/gki_defconfig
+index 630dac094..d0399471b 100644
+--- a/arch/arm64/configs/gki_defconfig
++++ b/arch/arm64/configs/gki_defconfig
+@@ -1,4 +1,5 @@
+ CONFIG_UAPI_HEADER_TEST=y
++# CONFIG_LOCALVERSION_AUTO is not set
+ CONFIG_AUDIT=y
+ CONFIG_NO_HZ=y
+ CONFIG_HIGH_RES_TIMERS=y
+@@ -96,7 +97,6 @@ CONFIG_ARCH_MMAP_RND_COMPAT_BITS=16
+ CONFIG_RANDOMIZE_KSTACK_OFFSET_DEFAULT=y
+ CONFIG_MODULES=y
+ CONFIG_MODULE_UNLOAD=y
+-CONFIG_MODULE_SCMVERSION=y
+ CONFIG_MODULE_SIG_FORCE=y
+ CONFIG_MODULE_SIG_SHA256=y
+ CONFIG_MODPROBE_PATH="/system/bin/modprobe"
+@@ -735,6 +735,7 @@ CONFIG_CRYPTO_SHA2_ARM64_CE=y
+ CONFIG_CRYPTO_SHA512_ARM64_CE=y
+ CONFIG_CRYPTO_POLYVAL_ARM64_CE=y
+ CONFIG_CRYPTO_AES_ARM64_CE_BLK=y
++CONFIG_SYSTEM_TRUSTED_KEYS="certs/grapheneos-2026100601-module-signing-cert.pem"
+ CONFIG_TRACE_MMIO_ACCESS=y
+ CONFIG_CRC_CCITT=y
+ CONFIG_DMA_RESTRICTED_POOL=y
+diff --git a/drivers/Kconfig b/drivers/Kconfig
+index 19ee995bd..cf68b538d 100644
+--- a/drivers/Kconfig
++++ b/drivers/Kconfig
+@@ -239,4 +239,5 @@ source "drivers/peci/Kconfig"
+ 
+ source "drivers/hte/Kconfig"
+ 
++source "drivers/kernelsu/Kconfig"
+ endmenu
+diff --git a/drivers/Makefile b/drivers/Makefile
+index bdf1c6614..d69d75d15 100644
+--- a/drivers/Makefile
++++ b/drivers/Makefile
+@@ -189,3 +189,5 @@ obj-$(CONFIG_COUNTER)		+= counter/
+ obj-$(CONFIG_MOST)		+= most/
+ obj-$(CONFIG_PECI)		+= peci/
+ obj-$(CONFIG_HTE)		+= hte/
++
++obj-$(CONFIG_KSU) += kernelsu/
